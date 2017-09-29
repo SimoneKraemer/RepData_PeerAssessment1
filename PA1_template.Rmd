@@ -1,25 +1,154 @@
 ---
-title: "Reproducible Research: Peer Assessment 1"
-output: 
-  html_document:
-    keep_md: true
+title: "Reproducible Research - Assignment Week 2"
+author: "Simone Krämer"
+date: "24 September 2017"
+output: html_document
 ---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
 
 ## Loading and preprocessing the data
+1. Load the data  
+Check if the data was already downloaded to the working directory. If not, download it...
+```{r}
+url <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip"
+if (!file.exists("PersonalMovementData.zip"))
+{
+    download.file(url,
+                  destfile='PersonalMovementData.zip',
+                  mode="wb")
+}
 
+if (!dir.exists("./PersonalMovementData"))
+{
+    unzip(zipfile = "PersonalMovementData.zip",
+          exdir = "./PersonalMovementData")
+}
+```
+
+... then it can be loaded into R:
+```{r}
+data <- read.csv("./PersonalMovementData/activity.csv")
+```
+
+2. Process/transform the data (if necessary) into a format suitable for your analysis  
+```{r}
+data$date <- as.Date(data$date, "%Y-%m-%d")
+```
 
 
 ## What is mean total number of steps taken per day?
+In this first analysis, missing data will be ignored.
 
+1. Calculate the total number of steps taken per day
+```{r}
+numStepsDay <- aggregate(data$steps, by = list(data$date), FUN = sum, na.rm = TRUE)
+colnames(numStepsDay) <- c("day", "numberOfSteps")
+print(numStepsDay)
+```
+
+2. Histogram of the total number of steps taken each day
+```{r}
+library(ggplot2)
+qplot(numStepsDay$numberOfSteps, geom = "histogram", binwidth = 500,
+      xlab = "Number of Steps taken per day", fill=I("darkgreen"),
+      col=I("black"))
+```
+
+3. Calculate and report the mean and median of the total number of steps taken per day
+```{r}
+meanNumStepsDay <- mean(numStepsDay$numberOfSteps, na.rm = TRUE)
+medianNumStepsDay <- median(numStepsDay$numberOfSteps, na.rm = TRUE)
+```
+The mean value of steps taken per day is `r round(meanNumStepsDay, 0)`; the median value is `r medianNumStepsDay`.  
 
 
 ## What is the average daily activity pattern?
+1. Time series plot of the 5-minute interval and the average number of steps taken, averaged across all days
+```{r}
+meanStepsInterval <- aggregate(data$steps, by = list(data$interval), FUN = mean, na.rm = TRUE)
+colnames(meanStepsInterval) <- c("interval", "meanNumberOfSteps")
+
+library(ggplot2)
+g <- ggplot(meanStepsInterval, aes(meanStepsInterval$interval, meanStepsInterval$meanNumberOfSteps))
+g + geom_line(colour = 'red') + labs(x = "Interval [-]", y = "Average number of steps per Interval [-]")
+```
+
+2. Which 5-minute interval, on average across all the days in the dataset, contains the maximum number of steps?
+```{r}
+maxMeanStepsInterval <- max(meanStepsInterval$meanNumberOfSteps, na.rm = TRUE)
+interval <- meanStepsInterval[meanStepsInterval$meanNumberOfSteps == maxMeanStepsInterval,]$interval
+```
+The interval which has the highest number of steps averaged across all the days is ```r interval```.
 
 
+# Imputing missing values
+1. Calculate and report the total number of missing values in the dataset (i.e. the total number of rows with NAs)
+```{r}
+totalnumberNA <- sum(is.na(data$steps))
+```
+The number of missing values in the dataset is ```r totalnumberNA```.
 
-## Imputing missing values
+2. Devise a strategy for filling in all of the missing values in the dataset.  
+Assumption: If there is no data available for that interval, it will take the mean value for that interval.
+So first, generate data with replacement data for all missing values
+```{r}
+library(plyr)
+indNA <- which(!complete.cases(data$steps))
+dataNA <- data[indNA,]
+dataFilledNA <- join(dataNA, meanStepsInterval, by = "interval")
+dataFilledNA <- dataFilledNA[, c("interval", "date", "meanNumberOfSteps")]
+colnames(dataFilledNA) <- c("interval", "date", "steps")
+```
 
+3. Create a new dataset that is equal to the original dataset but with the missing data filled in.
+```{r}
+dataComplete <- data[which(complete.cases(data$steps)),]
+dataComplete <- rbind(dataComplete, dataFilledNA)
+dataComplete <- dataComplete[order(dataComplete$date, dataComplete$interval), ]
+```
+
+4. Histogram of the total number of steps taken each day
+```{r}
+library(ggplot2)
+numStepsDay <- aggregate(dataComplete$steps, by = list(dataComplete$date), FUN = sum, na.rm = TRUE)
+colnames(numStepsDay) <- c("day", "numberOfSteps")
+
+qplot(numStepsDay$numberOfSteps, geom = "histogram", binwidth = 500,
+      xlab = "Number of Steps taken per day", fill=I("orange"),
+      col=I("black"))
+```
+
+Calculate and report the mean and median total number of steps taken per day:
+```{r}
+meanNumStepsDay <- mean(numStepsDay$numberOfSteps, na.rm = TRUE)
+medianNumStepsDay <- median(numStepsDay$numberOfSteps, na.rm = TRUE)
+```
+The mean value of steps taken per day is `r round(meanNumStepsDay, 0)`; the median value is `r medianNumStepsDay`.  
+These values differ from the estimates from the first part of the assignment; now mean and median value are the same.  
 
 
 ## Are there differences in activity patterns between weekdays and weekends?
+1. Create a new factor variable in the dataset with two levels - "weekday" and "weekend" indicating whether a given date is a weekday or weekend day.
+```{r}
+library(dplyr)
+weekdays <- c("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag")
+dataComplete <- mutate(dataComplete, dayType = factor((weekdays(dataComplete$date) %in% weekdays), 
+                       levels=c(FALSE, TRUE), labels=c('weekend', 'weekday')))
+```
+
+2. Make a panel plot containing a time series plot (i.e. type = "l") of the 5-minute interval (x-axis) and the average number of steps taken, averaged across all weekday days or weekend days (y-axis)
+```{r}
+meanStepsDayType <- aggregate(dataComplete$steps, by = list(dataComplete$interval,
+                                                            dataComplete$dayType),
+                              FUN = mean, na.rm = TRUE)
+colnames(meanStepsDayType) <- c("interval", "dayType", "meanNumberOfSteps")
+
+library(ggplot2)
+g <- ggplot(dataComplete, aes(dataComplete$interval, dataComplete$steps))
+g + geom_line(colour = 'blue') + 
+    labs(x = "Interval [-]", y = "Number of Steps [-]") + 
+    facet_grid(dayType ~ ., switch = "y")
+```
